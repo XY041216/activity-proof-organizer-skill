@@ -1,0 +1,3 @@
+display_name: Activity Proof Organizer
+short_description: Organize activity proofs by name or ID.
+default_prompt: Organize activity proof files by name or student ID, mark matching rows, rename outputs by activity name, and generate a summary file.
