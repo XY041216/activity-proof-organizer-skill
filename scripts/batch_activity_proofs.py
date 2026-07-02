@@ -112,7 +112,7 @@ def render_pdf_page(pdf: pdfium.PdfDocument, page_index: int, scale: float, out_
 
 
 def ocr_pdf(path: Path, targets: list[str], scale: float) -> tuple[dict[int, list[tuple[float, float, float, float, str]]], dict[int, str]]:
-    hits_by_page: dict[int, list[tuple[float, float, float, float, str]]] = defaultdict(list)
+    hits_by_page: dict[int, list[tuple[float, float, float, float, str]]] = {}
     text_by_page: dict[int, str] = {}
     pdf = pdfium.PdfDocument(str(path))
     with tempfile.TemporaryDirectory(prefix="activity_proof_ocr_") as tmp:
@@ -120,25 +120,25 @@ def ocr_pdf(path: Path, targets: list[str], scale: float) -> tuple[dict[int, lis
         for idx in range(len(pdf)):
             image_path = tmp_path / f"page_{idx + 1:04d}.png"
             render_pdf_page(pdf, idx, scale, image_path)
-            page_payload = run_ocr(image_path)
-            text_by_page[idx] = page_payload.get("Text", "")
-            lines = page_payload.get("Lines", [])
+            page_boxes: list[tuple[float, float, float, float, str]] = []
             for target in targets:
                 target_norm = normalize_text(target)
                 if not target_norm:
                     continue
-                for line in lines:
-                    if target_norm in normalize_text(line.get("Text", "")):
-                        hits_by_page[idx].append(
-                            (
-                                float(line["X"]) / scale,
-                                float(line["Y"]) / scale,
-                                float(line["X"] + line["Width"]) / scale,
-                                float(line["Y"] + line["Height"]) / scale,
-                                target,
-                            )
+                page_payload = run_ocr(image_path, target)
+                text_by_page[idx] = max(text_by_page.get(idx, ""), page_payload.get("Text", ""), key=len)
+                for line in page_payload.get("Hits", []):
+                    page_boxes.append(
+                        (
+                            float(line["X"]) / scale,
+                            float(line["Y"]) / scale,
+                            float(line["X"] + line["Width"]) / scale,
+                            float(line["Y"] + line["Height"]) / scale,
+                            target,
                         )
-            hits_by_page[idx] = merge_boxes(hits_by_page[idx])
+                    )
+            if page_boxes:
+                hits_by_page[idx] = merge_boxes(page_boxes)
     pdf.close()
     return dict(hits_by_page), text_by_page
 
@@ -259,6 +259,7 @@ def annotate_pdf(
         all_text = "\n".join(text_by_page.get(i, "") for i in sorted(text_by_page))
         metadata = extract_metadata(source.name, all_text)
         selected = sorted({0, page_count - 1, *hits_by_page.keys()})
+        expected_selected = len({0, page_count - 1, *hits_by_page.keys()})
 
         reader = PdfReader(str(source))
         writer = PdfWriter()
@@ -278,6 +279,12 @@ def annotate_pdf(
                 annotation[NameObject("/C")] = ArrayObject([FloatObject(1), FloatObject(0), FloatObject(0)])
                 annotation[NameObject("/BS")] = DictionaryObject({NameObject("/W"): NumberObject(2), NameObject("/S"): NameObject("/S")})
                 writer.add_annotation(page_number=output_idx, annotation=annotation)
+
+        if len(selected) != expected_selected or len(writer.pages) != expected_selected:
+            raise RuntimeError(
+                f"PDF trim validation failed for {source.name}: "
+                f"selected={len(selected)}, writer_pages={len(writer.pages)}, expected={expected_selected}"
+            )
 
     out_path = unique_path(output_dir / f"{metadata['活动名']}.pdf")
     with out_path.open("wb") as f:
@@ -353,8 +360,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Batch organize activity proof PDFs/images by participant name or student ID.")
     parser.add_argument("--input", required=True, help="Folder containing source PDFs/images.")
     parser.add_argument("--output", default=None, help=f"Output folder. Default: <input>/{DEFAULT_OUTPUT}")
-    parser.add_argument("--name", default="", help="Participant name, e.g. 姓名.")
-    parser.add_argument("--student-id", default="", help="Student ID, e.g. 学号.")
+    parser.add_argument("--name", default="", help="Participant name, e.g. 徐阳.")
+    parser.add_argument("--student-id", default="", help="Student ID, e.g. 2023013482.")
     parser.add_argument("--render-scale", type=float, default=2.0, help="PDF render scale for OCR. Increase to 3 for blurry scans.")
     parser.add_argument("--manual-hit", action="append", default=[], help="Manual hint: filename.pdf:page or filename.pdf:page:top-bottom.")
     args = parser.parse_args()

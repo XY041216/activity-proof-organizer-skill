@@ -26,6 +26,9 @@ If only one identifier is known, pass only `--name` or only `--student-id`.
    - first page,
    - every page containing the participant name or student ID,
    - last page.
+   A page counts as matched only when the script has at least one non-empty
+   target hit/box on that page. Never treat an empty OCR result, an empty list
+   in `hits_by_page`, or unrelated PDF annotations as a matched page.
 5. For each image, keep the image and draw a red rectangle around the matching row when found.
 6. Rename processed files using the internal activity name. Use a safe, de-duplicated filename. Do not rely only on the source filename unless content extraction fails.
 7. Generate `活动证明汇总.csv` and `活动证明汇总.md` with:
@@ -54,8 +57,8 @@ When Windows OCR is unavailable, the script still handles text-layer PDFs, but s
 
 Use all provided identifiers. Treat a page as matched when any identifier appears:
 
-- exact full name, e.g. `姓名`;
-- student ID, e.g. `学号`;
+- exact full name, e.g. `徐阳`;
+- student ID, e.g. `2023013482`;
 - for Chinese two-character names, same-line separated characters may be a match;
 - for difficult scans, manual page hints may be used with `--manual-hit`.
 
@@ -78,6 +81,9 @@ After processing, check:
 
 - every expected source file has an output file;
 - every output PDF page count equals `first + hit pages + last` after de-duplication;
+- every hit page listed in the summary has at least one non-empty hit box before
+  trimming; if no target hit is found, keep only first/last and mark the row for
+  manual review or rerun with `--manual-hit`;
 - every matched output PDF has at least one red square annotation;
 - images with matches visibly contain a red row rectangle;
 - summary filenames match output filenames;
